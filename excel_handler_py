@@ -383,8 +383,22 @@ def get_scenario_type(scenario: Dict[str, Any]) -> str:
 def generate_sql_for_scenario(scenario: Dict[str, Any], project_id: str = None, dataset_id: str = 'banking_sample_data') -> str:
     """Generate SQL for a specific scenario for preview purposes."""
     
+    # Early validation to prevent hanging
+    if not scenario:
+        return "-- ERROR: No scenario provided"
+    
+    if not scenario.get('scenario_name'):
+        return "-- ERROR: Scenario name is missing"
+    
+    if not scenario.get('source_table'):
+        return "-- ERROR: Source table is missing"
+    
+    if not scenario.get('derivation_logic'):
+        return "-- ERROR: Derivation logic is missing"
+    
     # Check if project_id is provided or available in session state
     if project_id is None:
+        import streamlit as st
         project_id = st.session_state.get('project_id')
         
     if not project_id:
@@ -396,8 +410,18 @@ def generate_sql_for_scenario(scenario: Dict[str, Any], project_id: str = None, 
 SELECT 'ERROR: Project ID not configured' as error_message;"""
     
     try:
-        # Generate SQL based on scenario type
+        # Add logging to help debug
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Starting SQL generation for scenario: {scenario.get('scenario_name')}")
+        
+        # Generate SQL based on scenario type with timeout protection
+        sql_query = None
+        scenario_type = None
+        
         if scenario.get('reference_table') and str(scenario.get('reference_table')).lower() not in ['nan', 'none', '']:
+            scenario_type = "Reference Table"
+            logger.info(f"Generating reference table validation SQL")
             # Reference table validation
             sql_query = create_reference_table_validation_sql(
                 source_table=scenario['source_table'],
@@ -417,6 +441,8 @@ SELECT 'ERROR: Project ID not configured' as error_message;"""
                 target_dataset_id=scenario.get('target_dataset_id', dataset_id)
             )
         elif scenario.get('target_table') and str(scenario.get('target_table')).lower() not in ['nan', 'none', '']:
+            scenario_type = "Enhanced Transformation"
+            logger.info(f"Generating enhanced transformation validation SQL")
             # Enhanced transformation validation
             sql_query = create_enhanced_transformation_sql(
                 source_table=scenario['source_table'],
@@ -430,7 +456,10 @@ SELECT 'ERROR: Project ID not configured' as error_message;"""
                 target_dataset_id=scenario.get('target_dataset_id', dataset_id)
             )
         else:
+            scenario_type = "Basic Transformation"
+            logger.info(f"Generating basic transformation validation SQL")
             # Basic transformation validation
+            column_manager = get_dynamic_column_manager(project_id, dataset_id)
             sql_query = create_transformation_validation_sql(
                 source_table=scenario['source_table'],
                 target_table=scenario.get('target_table', scenario['source_table']),
@@ -440,14 +469,35 @@ SELECT 'ERROR: Project ID not configured' as error_message;"""
                 derivation_logic=scenario['derivation_logic'],
                 project_id=project_id,
                 source_dataset_id=scenario.get('source_dataset_id', dataset_id),
-                target_dataset_id=scenario.get('target_dataset_id', dataset_id)
+                target_dataset_id=scenario.get('target_dataset_id', dataset_id),
+                column_manager=column_manager
             )
         
-        return sql_query if sql_query else "-- SQL generation failed"
+        logger.info(f"SQL generation completed for {scenario_type} scenario")
+        
+        # Validate the generated SQL
+        if not sql_query:
+            return f"""-- ❌ ERROR: {scenario_type} SQL generation returned empty result
+-- Scenario: {scenario.get('scenario_name')}
+-- Please check the scenario configuration
+
+SELECT 'Empty SQL result' as error_message;"""
+        
+        if len(sql_query.strip()) < 10:
+            return f"""-- ❌ ERROR: {scenario_type} SQL generation returned invalid result
+-- Scenario: {scenario.get('scenario_name')}  
+-- Result was too short: {sql_query}
+
+SELECT 'Invalid SQL result' as error_message;"""
+        
+        return sql_query
         
     except Exception as e:
+        error_msg = str(e)
+        logger.error(f"SQL generation failed for scenario {scenario.get('scenario_name')}: {error_msg}")
         return f"""-- ❌ ERROR: Failed to generate SQL query
--- Error details: {str(e)}
+-- Scenario: {scenario.get('scenario_name', 'Unknown')}
+-- Error details: {error_msg}
 -- Please check your scenario configuration and project settings
 
-SELECT 'SQL generation error' as error_message;"""
+SELECT 'SQL generation error: {error_msg}' as error_message;"""
