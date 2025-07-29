@@ -509,25 +509,30 @@ SELECT 'ERROR: Project ID not configured' as error_message;""", language='sql')
                             # Add timeout protection using threading for cross-platform compatibility
                             import threading
                             import time
+                            import logging
+                            
+                            # CRITICAL: Capture session state values BEFORE starting thread
+                            # Threads cannot access Streamlit session state
+                            captured_project_id = st.session_state.get('project_id')
+                            captured_dataset_id = st.session_state.get('dataset_id')
+                            
+                            logger = logging.getLogger(__name__)
+                            logger.info(f"🎯 CAPTURED session values BEFORE threading:")
+                            logger.info(f"  - captured_project_id: '{captured_project_id}' (type: {type(captured_project_id)})")
+                            logger.info(f"  - captured_dataset_id: '{captured_dataset_id}' (type: {type(captured_dataset_id)})")
                             
                             sql_result = [None]  # Use list to allow modification in nested function
                             exception_result = [None]
                             
                             def generate_sql_with_timeout():
                                 try:
-                                    # *** DEBUG: Show what's being passed to generate_sql_for_scenario ***
-                                    debug_project_id = st.session_state.get('project_id')
-                                    debug_dataset_id = st.session_state.get('dataset_id')
-                                    
-                                    st.write("🔍 **DEBUG: Calling generate_sql_for_scenario with:**")
-                                    st.write(f"- scenario: `{selected_scenario.get('scenario_name', 'Unknown')}`")
-                                    st.write(f"- project_id parameter: `{repr(debug_project_id)}` (type: {type(debug_project_id).__name__})")
-                                    st.write(f"- dataset_id parameter: `{repr(debug_dataset_id)}` (type: {type(debug_dataset_id).__name__})")
+                                    # Use the captured values instead of trying to access session state
+                                    logger.info(f"🚀 THREAD: Calling generate_sql_for_scenario with captured values")
                                     
                                     sql_result[0] = generate_sql_for_scenario(
                                         selected_scenario,
-                                        debug_project_id,
-                                        debug_dataset_id
+                                        captured_project_id,  # Use captured value
+                                        captured_dataset_id   # Use captured value
                                     )
                                 except Exception as e:
                                     exception_result[0] = e
