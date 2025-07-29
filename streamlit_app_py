@@ -139,6 +139,20 @@ def main():
         # Quick actions
         st.markdown("#### Quick Actions")
         
+        # Add debug information
+        with st.expander("🔍 Debug Information", expanded=False):
+            st.markdown("**Session State Values:**")
+            st.write(f"- project_id: `{st.session_state.get('project_id', 'NOT SET')}`")
+            st.write(f"- dataset_id: `{st.session_state.get('dataset_id', 'NOT SET')}`")
+            st.write(f"- connection_status: `{st.session_state.get('connection_status', 'NOT SET')}`")
+            
+            st.markdown("**Current Input Values:**")
+            st.write(f"- Current project_id input: `{project_id if project_id else 'EMPTY'}`")
+            st.write(f"- Current dataset_id input: `{dataset_id if dataset_id else 'EMPTY'}`")
+            
+            if st.button("🗃️ Show All Session State"):
+                st.json(dict(st.session_state))
+        
         if st.button("Reset Session"):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
@@ -414,9 +428,42 @@ def show_excel_mapping_tab():
                 
                 # Check if project ID is configured before attempting SQL generation
                 project_id = st.session_state.get('project_id')
+                dataset_id = st.session_state.get('dataset_id')
+                
+                # Debug information
+                st.markdown("**🔍 Configuration Check:**")
+                col_debug1, col_debug2 = st.columns(2)
+                with col_debug1:
+                    if project_id:
+                        st.success(f"✅ Project ID: `{project_id}`")
+                    else:
+                        st.error("❌ Project ID: Not configured")
+                
+                with col_debug2:
+                    if dataset_id:
+                        st.success(f"✅ Dataset ID: `{dataset_id}`")
+                    else:
+                        st.warning("⚠️ Dataset ID: Not configured")
+                
                 if not project_id:
                     st.warning("⚠️ **Project ID Required**")
                     st.info("Please configure your Google Cloud Project ID in the sidebar to generate SQL queries.")
+                    
+                    # Add manual override for testing
+                    with st.expander("🛠️ Manual Override (for testing)", expanded=False):
+                        st.warning("**Use this only for testing purposes**")
+                        manual_project_id = st.text_input("Enter Project ID manually:", key="manual_project_override")
+                        manual_dataset_id = st.text_input("Enter Dataset ID manually:", key="manual_dataset_override")
+                        
+                        if st.button("🔧 Use Manual Values", key="use_manual_override"):
+                            if manual_project_id and manual_dataset_id:
+                                st.session_state['project_id'] = manual_project_id
+                                st.session_state['dataset_id'] = manual_dataset_id
+                                st.success("Manual values applied! Try generating SQL again.")
+                                st.rerun()
+                            else:
+                                st.error("Please enter both Project ID and Dataset ID")
+                    
                     st.code("""-- ❌ ERROR: Google Cloud Project ID not configured!
 -- Table is not accessible. Please configure your project ID in the settings.
 -- Go to Settings → Set your Google Cloud Project ID in the sidebar
