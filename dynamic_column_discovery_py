@@ -31,7 +31,14 @@ class DynamicColumnManager:
         if cache_key in self.table_schemas:
             return self.table_schemas[cache_key]
         
+        # Add timeout protection and validation
+        if not project_id or not dataset_id or not table_name:
+            self.logger.error(f"Invalid parameters for schema discovery: project_id={project_id}, dataset_id={dataset_id}, table_name={table_name}")
+            return self._create_fallback_schema(table_name)
+        
         try:
+            self.logger.info(f"Starting schema discovery for {table_name}")
+            
             # Query BigQuery information schema to get column details
             schema_query = f"""
             SELECT 
@@ -52,16 +59,20 @@ class DynamicColumnManager:
             FROM `{project_id}.{dataset_id}.INFORMATION_SCHEMA.COLUMNS`
             WHERE table_name = '{table_name}'
             ORDER BY ordinal_position
+            LIMIT 1000  -- Prevent extremely large results
             """
             
+            self.logger.info(f"Executing schema query for {table_name}")
             result, message = execute_custom_query(schema_query, "schema_discovery")
             
             # Fallback to standalone client if Streamlit is not available
             if result is None and STANDALONE_AVAILABLE:
                 try:
+                    self.logger.info(f"Trying standalone client for {table_name}")
                     result = execute_standalone_query(schema_query, project_id)
                     message = "Success using standalone client"
                 except Exception as e:
+                    self.logger.error(f"Standalone query failed for {table_name}: {e}")
                     result = None
                     message = f"Standalone query failed: {e}"
             
