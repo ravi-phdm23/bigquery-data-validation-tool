@@ -264,9 +264,13 @@ def convert_business_logic_to_safe_sql(derivation_logic, source_table, project_i
             # Fallback for CASE WHEN
             return '"Standard"'
         
-        # Simple column references
+        # Simple column references - Enhanced for direct column mapping
         elif logic.lower() in [col.lower() for col in available_columns]:
-            return logic.lower()
+            # Find the actual column name with proper casing
+            for col in available_columns:
+                if col.lower() == logic.lower():
+                    return col
+            return logic.lower()  # Fallback
         
         # Default fallback for unrecognized logic
         else:
@@ -281,6 +285,200 @@ def convert_business_logic_to_safe_sql(derivation_logic, source_table, project_i
     except Exception as e:
         # Safe fallback for any parsing errors
         return "1"
+
+
+def create_direct_column_comparison_sql(source_table, target_table, source_join_key, target_join_key, 
+                                      source_column, target_column, project_id, source_dataset_id, 
+                                      target_dataset_id=None, column_manager=None):
+    """Create SQL for direct column-to-column comparison without transformation.
+    
+    This function compares values in source_column directly with target_column
+    without any business logic transformation.
+    
+    Args:
+        source_table: Name of the source table
+        target_table: Name of the target table  
+        source_join_key: Join key column(s) in source table
+        target_join_key: Join key column(s) in target table
+        source_column: Column name in source table to compare
+        target_column: Column name in target table to compare
+        project_id: BigQuery project ID
+        source_dataset_id: Source dataset ID
+        target_dataset_id: Target dataset ID (optional, defaults to source_dataset_id)
+        column_manager: Column manager instance (optional)
+    
+    Returns:
+        SQL string for direct column comparison validation
+    """
+    
+    # Use target_dataset_id if provided, otherwise fall back to source_dataset_id
+    if target_dataset_id is None:
+        target_dataset_id = source_dataset_id
+    
+    source_ref = f"`{project_id}.{source_dataset_id}.{source_table}`"
+    target_ref = f"`{project_id}.{target_dataset_id}.{target_table}`"
+    
+    # Parse keys for composite key support
+    source_keys = parse_join_keys(source_join_key) if source_join_key else ['id']
+    target_keys = parse_join_keys(target_join_key) if target_join_key else ['id']
+    
+    # Create join condition
+    try:
+        join_condition = create_join_condition(source_keys, target_keys, 's', 't')
+    except ValueError as e:
+        # Fallback to first key if composite key mismatch
+        join_condition = f"s.{source_keys[0]} = t.{target_keys[0]}"
+    
+    # Validate column names if column_manager is available
+    if column_manager:
+        # Get available columns for validation
+        source_columns = column_manager.get_table_columns(source_table)
+        target_columns = column_manager.get_table_columns(target_table)
+        
+        # Map logical names to actual column names
+        source_column = column_manager.map_column(source_table, source_column)
+        target_column = column_manager.map_column(target_table, target_column)
+        
+        # Log column validation
+        logging.info(f"🔍 Direct Comparison: Source column '{source_column}' in {source_columns}")
+        logging.info(f"🔍 Direct Comparison: Target column '{target_column}' in {target_columns}")
+    
+    sql = f"""
+-- DIRECT Column-to-Column Comparison Validation
+-- Source: {source_table}.{source_column} vs Target: {target_table}.{target_column}
+-- Join: {' + '.join(source_keys)} -> {' + '.join(target_keys)}
+-- No transformation applied - direct value comparison
+
+WITH source_data AS (
+    SELECT 
+        {', '.join(source_keys)} as join_keys,
+        {source_column} as source_value
+    FROM {source_ref}
+    WHERE {source_column} IS NOT NULL
+),
+target_data AS (
+    SELECT 
+        {', '.join(target_keys)} as join_keys,
+        {target_column} as target_value
+    FROM {target_ref}
+    WHERE {target_column} IS NOT NULL
+),
+direct_comparison AS (
+    SELECT 
+        COALESCE(s.join_keys, t.join_keys) as join_key,
+        s.source_value,
+        t.target_value,
+        CASE 
+            WHEN s.source_value IS NULL AND t.target_value IS NULL THEN 'BOTH_NULL'
+            WHEN s.source_value IS NULL THEN 'SOURCE_NULL'
+            WHEN t.target_value IS NULL THEN 'TARGET_NULL'
+            WHEN CAST(s.source_value AS STRING) = CAST(t.target_value AS STRING) THEN 'EXACT_MATCH'
+            ELSE 'VALUE_MISMATCH'
+        END as comparison_result,
+        CASE 
+            WHEN s.source_value IS NULL AND t.target_value IS NULL THEN 'Both values are NULL'
+            WHEN s.source_value IS NULL THEN 'Source value is NULL'
+            WHEN t.target_value IS NULL THEN 'Target value is NULL'
+            WHEN CAST(s.source_value AS STRING) = CAST(t.target_value AS STRING) THEN 'Values match exactly'
+            ELSE CONCAT('MISMATCH: Source="', s.source_value, '", Target="', t.target_value, '"')
+        END as comparison_details
+    FROM source_data s
+    FULL OUTER JOIN target_data t ON s.join_keys = t.join_keys
+),
+comparison_summary AS (
+    SELECT 
+        COUNT(*) as total_records,
+        COUNTIF(comparison_result = 'EXACT_MATCH') as exact_matches,
+        COUNTIF(comparison_result = 'VALUE_MISMATCH') as mismatches,
+        COUNTIF(comparison_result = 'SOURCE_NULL') as source_nulls,
+        COUNTIF(comparison_result = 'TARGET_NULL') as target_nulls,
+        COUNTIF(comparison_result = 'BOTH_NULL') as both_nulls
+    FROM direct_comparison
+),
+final_results AS (
+    -- Summary row
+    SELECT 
+        'SUMMARY' as record_type,
+        NULL as join_key,
+        NULL as source_value,
+        NULL as target_value,
+        CASE 
+            WHEN exact_matches = total_records THEN 'OVERALL_PASS'
+            WHEN mismatches = 0 THEN 'PASS_WITH_NULLS'
+            ELSE 'OVERALL_FAIL'
+        END as comparison_result,
+        CONCAT(
+            'Total: ', CAST(total_records AS STRING),
+            ', Exact Matches: ', CAST(exact_matches AS STRING),
+            ', Mismatches: ', CAST(mismatches AS STRING),
+            ', Source Nulls: ', CAST(source_nulls AS STRING),
+            ', Target Nulls: ', CAST(target_nulls AS STRING),
+            ', Match Rate: ', CAST(ROUND(exact_matches * 100.0 / NULLIF(total_records, 0), 2) AS STRING), '%'
+        ) as comparison_details,
+        1 as sort_order
+    FROM comparison_summary
+
+    UNION ALL
+
+    -- Mismatch details (limited to first 10 for readability)
+    SELECT 
+        'MISMATCH' as record_type,
+        CAST(join_key AS STRING) as join_key,
+        CAST(source_value AS STRING) as source_value,
+        CAST(target_value AS STRING) as target_value,
+        comparison_result,
+        comparison_details,
+        2 as sort_order
+    FROM (
+        SELECT 
+            join_key,
+            source_value,
+            target_value,
+            comparison_result,
+            comparison_details,
+            ROW_NUMBER() OVER (ORDER BY join_key) as rn
+        FROM direct_comparison
+        WHERE comparison_result = 'VALUE_MISMATCH'
+    )
+    WHERE rn <= 10
+
+    UNION ALL
+
+    -- Sample matches (limited to 5 for brevity)
+    SELECT 
+        'SAMPLE_MATCH' as record_type,
+        CAST(join_key AS STRING) as join_key,
+        CAST(source_value AS STRING) as source_value,
+        CAST(target_value AS STRING) as target_value,
+        comparison_result,
+        comparison_details,
+        3 as sort_order
+    FROM (
+        SELECT 
+            join_key,
+            source_value,
+            target_value,
+            comparison_result,
+            comparison_details,
+            ROW_NUMBER() OVER (ORDER BY join_key) as rn
+        FROM direct_comparison
+        WHERE comparison_result = 'EXACT_MATCH'
+    )
+    WHERE rn <= 5
+)
+
+SELECT 
+    record_type,
+    join_key,
+    source_value,
+    target_value,
+    comparison_result,
+    comparison_details
+FROM final_results
+ORDER BY sort_order, join_key
+"""
+    
+    return sql.strip()
 
 
 def parse_join_keys(join_key_str):
@@ -310,12 +508,46 @@ def create_join_condition(source_keys, target_keys, source_alias='s', target_ali
 def create_transformation_validation_sql(source_table, target_table, source_join_key, target_join_key, target_column, derivation_logic, project_id, source_dataset_id, target_dataset_id=None, column_manager=None):
     """Create SQL for transformation validation that works with existing tables only.
     Supports both single and composite join keys (comma-separated).
+    
+    Special handling for direct column comparisons:
+    - If derivation_logic is just a column name, uses direct comparison
+    - If derivation_logic contains transformations, uses transformation validation
     """
     
     # Use target_dataset_id if provided, otherwise fall back to source_dataset_id
     if target_dataset_id is None:
         target_dataset_id = source_dataset_id
     
+    # Check if this is a direct column comparison (no transformation)
+    if column_manager and derivation_logic:
+        # Clean the derivation logic
+        clean_logic = derivation_logic.strip()
+        
+        # Get available source columns
+        source_columns = column_manager.get_table_columns(source_table)
+        
+        # Check if derivation_logic is just a simple column name
+        is_simple_column = (
+            # No function calls, no operators, no complex logic
+            not any(func in clean_logic.upper() for func in ['CONCAT(', 'CASE ', 'IF(', 'SUM(', 'COUNT(', 'AVG(', 'MAX(', 'MIN(']) and
+            not any(op in clean_logic for op in ['+', '-', '*', '/', '>', '<', '=', 'AND', 'OR']) and
+            # Is a valid column name pattern
+            clean_logic.replace('_', '').replace(' ', '').isalnum() and
+            # Exists in source table (with mapping support)
+            (column_manager.has_column(source_table, clean_logic) or 
+             column_manager.has_column(source_table, column_manager.map_column(source_table, clean_logic)))
+        )
+        
+        if is_simple_column:
+            logging.info(f"🎯 Detected direct column comparison: {clean_logic} -> {target_column}")
+            # Use direct column comparison
+            source_column_mapped = column_manager.map_column(source_table, clean_logic)
+            return create_direct_column_comparison_sql(
+                source_table, target_table, source_join_key, target_join_key,
+                source_column_mapped, target_column, project_id, source_dataset_id, target_dataset_id, column_manager
+            )
+    
+    # Continue with transformation validation for complex logic
     source_ref = f"`{project_id}.{source_dataset_id}.{source_table}`"
     
     # Handle composite keys - split by comma and clean whitespace
