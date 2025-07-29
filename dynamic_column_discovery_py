@@ -5,7 +5,7 @@ Handles automatic discovery and mapping of table columns for BigQuery validation
 """
 
 import logging
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Any
 from google.cloud import bigquery
 import streamlit as st
 
@@ -49,19 +49,42 @@ class DynamicColumnManager:
     def get_table_columns(self, table_name: str) -> List[str]:
         """Get available columns for a table."""
         try:
-            # For now, return a basic set of common banking columns
-            # This can be enhanced to actually query BigQuery schema
-            common_columns = [
-                'customer_id', 'account_id', 'transaction_id',
-                'first_name', 'last_name', 'full_name',
-                'amount', 'balance', 'account_type',
-                'transaction_date', 'created_date',
-                'address', 'email', 'phone', 'status'
-            ]
+            # TODO: This should ideally query BigQuery to get actual schema
+            # For now, return a reasonable set of columns based on common banking tables
             
-            # Store in cache
-            self.table_schemas[table_name] = common_columns
-            return common_columns
+            # Different tables may have different schemas
+            if 'customer' in table_name.lower():
+                return [
+                    'customer_id', 'cust_id', 'id',
+                    'first_name', 'last_name', 'full_name', 'name',
+                    'address', 'email', 'phone', 'status',
+                    'created_date', 'account_type'
+                ]
+            elif 'account' in table_name.lower():
+                return [
+                    'account_id', 'acct_id', 'id', 'customer_id', 
+                    'balance', 'account_type', 'status',
+                    'created_date', 'open_date'
+                ]
+            elif 'transaction' in table_name.lower():
+                return [
+                    'transaction_id', 'trans_id', 'txn_id', 'id',
+                    'account_id', 'customer_id', 'amount', 'transaction_date',
+                    'transaction_type', 'status', 'description'
+                ]
+            else:
+                # Generic table - return broader set of possible columns
+                common_columns = [
+                    'id', 'customer_id', 'account_id', 'transaction_id',
+                    'first_name', 'last_name', 'full_name', 'name',
+                    'amount', 'balance', 'account_type',
+                    'transaction_date', 'created_date',
+                    'address', 'email', 'phone', 'status'
+                ]
+                
+                # Store in cache
+                self.table_schemas[table_name] = common_columns
+                return common_columns
             
         except Exception as e:
             logger.warning(f"Could not fetch schema for table {table_name}: {str(e)}")
@@ -149,6 +172,16 @@ class DynamicColumnManager:
         
         found_key = self._find_table_key(table_name, preferred_keys)
         return found_key or 'id'  # Default fallback
+    
+    def debug_table_info(self, table_name: str) -> Dict[str, Any]:
+        """Debug method to show what the column manager knows about a table."""
+        return {
+            'table_name': table_name,
+            'available_columns': self.get_table_columns(table_name),
+            'column_mapping': self.get_column_mapping(table_name),
+            'name_concat_expression': self.get_name_concat_expression(table_name),
+            'suggested_join_key': self.get_join_key(table_name)
+        }
 
 
 # Global instance cache
