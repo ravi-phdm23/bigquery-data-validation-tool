@@ -412,7 +412,19 @@ def show_excel_mapping_tab():
                 # Cache SQL generation in session state to avoid regeneration
                 sql_cache_key = f"sql_cache_{selected_scenario['scenario_name']}"
                 
-                if sql_cache_key not in st.session_state:
+                # Check if project ID is configured before attempting SQL generation
+                project_id = st.session_state.get('project_id')
+                if not project_id:
+                    st.warning("⚠️ **Project ID Required**")
+                    st.info("Please configure your Google Cloud Project ID in the sidebar to generate SQL queries.")
+                    st.code("""-- ❌ ERROR: Google Cloud Project ID not configured!
+-- Table is not accessible. Please configure your project ID in the settings.
+-- Go to Settings → Set your Google Cloud Project ID in the sidebar
+
+-- Cannot generate SQL query without valid project ID
+SELECT 'ERROR: Project ID not configured' as error_message;""", language='sql')
+                    
+                elif sql_cache_key not in st.session_state:
                     with st.spinner("Generating SQL..."):
                         try:
                             # Add timeout protection using threading for cross-platform compatibility
@@ -427,7 +439,7 @@ def show_excel_mapping_tab():
                                     sql_result[0] = generate_sql_for_scenario(
                                         selected_scenario,
                                         st.session_state.get('project_id'),
-                                        st.session_state.get('dataset_id', 'banking_sample_data')
+                                        st.session_state.get('dataset_id')
                                     )
                                 except Exception as e:
                                     exception_result[0] = e
@@ -472,23 +484,35 @@ SELECT 'Unknown SQL generation state' as unknown_message;"""
 
 SELECT 'System error in SQL generation: {str(e)}' as system_error;"""
                 
-                sql_query = st.session_state[sql_cache_key]
-                
-                if sql_query and not sql_query.startswith("-- Error"):
-                    st.code(sql_query, language='sql')
+                # Display the SQL query (either from cache or newly generated)
+                if project_id:  # Only show SQL if project ID is configured
+                    sql_query = st.session_state[sql_cache_key]
                     
-                    # Add download button for SQL
-                    st.download_button(
-                        label="📥 Download SQL",
-                        data=sql_query,
-                        file_name=f"{selected_scenario['scenario_name']}_validation.sql",
-                        mime="text/sql",
-                        key=f"download_sql_{selected_scenario['scenario_name']}"
-                    )
-                    
-                    st.info("💡 You can copy the SQL above and run it directly in BigQuery console.")
-                else:
-                    st.error(f"Failed to generate SQL: {sql_query}")
+                    if sql_query and not (sql_query.startswith("-- Error") or sql_query.startswith("-- ❌ ERROR") or sql_query.startswith("-- ⏰ TIMEOUT") or sql_query.startswith("-- ❓ UNKNOWN")):
+                        st.code(sql_query, language='sql')
+                        
+                        # Add download button for SQL
+                        st.download_button(
+                            label="📥 Download SQL",
+                            data=sql_query,
+                            file_name=f"{selected_scenario['scenario_name']}_validation.sql",
+                            mime="text/sql",
+                            key=f"download_sql_{selected_scenario['scenario_name']}"
+                        )
+                        
+                        st.info("💡 You can copy the SQL above and run it directly in BigQuery console.")
+                    else:
+                        # Display the error message as code but with error styling
+                        st.error("SQL Generation Failed")
+                        st.code(sql_query, language='sql')
+                        
+                        # Add helpful instructions for common errors
+                        if "Project ID not configured" in sql_query:
+                            st.info("👆 **Next Steps:**\n1. Enter your Google Cloud Project ID in the sidebar\n2. Click 'Connect to BigQuery'\n3. Try generating SQL again")
+                        elif "timeout" in sql_query.lower():
+                            st.info("👆 **Next Steps:**\n1. Click '🗑️ Clear Cache' button above\n2. Try a simpler derivation logic\n3. Check your internet connection")
+                        else:
+                            st.info("👆 **Next Steps:**\n1. Check your scenario configuration\n2. Verify your BigQuery connection\n3. Try clicking '🗑️ Clear Cache' button above")
             else:
                 st.warning("No scenario selected or scenario not found.")
         
