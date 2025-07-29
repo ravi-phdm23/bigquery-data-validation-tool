@@ -400,8 +400,27 @@ def generate_sql_for_scenario(scenario: Dict[str, Any], project_id: str = None, 
     if project_id is None:
         import streamlit as st
         project_id = st.session_state.get('project_id')
+    
+    # *** DEBUG: Add detailed project ID debugging ***
+    import streamlit as st
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"🔍 PROJECT ID DEBUG in generate_sql_for_scenario:")
+    logger.info(f"  - project_id parameter: '{project_id}' (type: {type(project_id)})")
+    logger.info(f"  - session_state project_id: '{st.session_state.get('project_id')}' (type: {type(st.session_state.get('project_id'))})")
+    logger.info(f"  - session_state keys: {list(st.session_state.keys())}")
+    
+    # Show debug info in Streamlit as well
+    st.write("🔍 **PROJECT ID DEBUG in generate_sql_for_scenario:**")
+    st.write(f"- Function parameter `project_id`: `{repr(project_id)}` (type: {type(project_id).__name__})")
+    st.write(f"- Session state `project_id`: `{repr(st.session_state.get('project_id'))}` (type: {type(st.session_state.get('project_id')).__name__})")
+    st.write(f"- Boolean check `not project_id`: {not project_id}")
+    st.write(f"- Boolean check `project_id is None`: {project_id is None}")
+    st.write(f"- Boolean check `project_id == ''`: {project_id == ''}")
         
     if not project_id:
+        st.error("❌ **Project ID validation failed at line 409 in excel_handler.py**")
         return """-- ❌ ERROR: Google Cloud Project ID not configured!
 -- Table is not accessible. Please configure your project ID in the settings.
 -- Go to Settings → Set your Google Cloud Project ID in the sidebar
