@@ -111,35 +111,74 @@ def convert_business_logic_to_safe_sql(derivation_logic, source_table, project_i
             else:
                 return '"Within Range"'
         
-        # String concatenation
+        # String concatenation - Preserve user's original CONCAT logic
         elif logic.upper().startswith('CONCAT('):
-            # Parse the CONCAT logic to extract requested fields
+            # First, try to use the original logic as-is if it contains valid column references
             import re
             concat_match = re.search(r'CONCAT\((.*?)\)', logic, re.IGNORECASE)
             if concat_match:
                 concat_content = concat_match.group(1)
-                # Check if it's a name concatenation pattern
-                if 'first_name' in concat_content and 'last_name' in concat_content:
-                    # Use configurable name concatenation
-                    return column_manager.get_name_concat_expression(source_table)
-                elif 'address' in concat_content or 'email' in concat_content:
-                    # Handle address concatenation
-                    parts = []
-                    for part in concat_content.split(','):
-                        part = part.strip().strip('"\'')
-                        if part in ['first_name', 'last_name', 'address', 'email']:
-                            mapped_col = column_manager.map_column(source_table, part)
-                            if column_manager.has_column(source_table, mapped_col):
-                                parts.append(mapped_col)
-                        elif part.startswith('"') or part.startswith("'"):
-                            parts.append(part)
+                
+                # Parse the CONCAT parameters more carefully
+                # Split by comma but respect quoted strings
+                params = []
+                current_param = ""
+                in_quote = False
+                quote_char = None
+                paren_count = 0
+                
+                for char in concat_content:
+                    if char in ['"', "'"] and not in_quote:
+                        in_quote = True
+                        quote_char = char
+                        current_param += char
+                    elif char == quote_char and in_quote:
+                        in_quote = False
+                        quote_char = None
+                        current_param += char
+                    elif char == '(' and not in_quote:
+                        paren_count += 1
+                        current_param += char
+                    elif char == ')' and not in_quote:
+                        paren_count -= 1
+                        current_param += char
+                    elif char == ',' and not in_quote and paren_count == 0:
+                        params.append(current_param.strip())
+                        current_param = ""
+                    else:
+                        current_param += char
+                
+                # Add the last parameter
+                if current_param.strip():
+                    params.append(current_param.strip())
+                
+                # Now validate each parameter
+                valid_params = []
+                for param in params:
+                    param = param.strip()
+                    
+                    # If it's a quoted string, keep it as-is
+                    if param.startswith('"') and param.endswith('"'):
+                        valid_params.append(param)
+                    elif param.startswith("'") and param.endswith("'"):
+                        valid_params.append(param)
+                    else:
+                        # It's a column reference - check if it exists in the table
+                        if column_manager.has_column(source_table, param):
+                            valid_params.append(param)
                         else:
-                            # Literal string
-                            parts.append(f'"{part}"')
-                    if parts:
-                        return f'CONCAT({", ".join(parts)})'
+                            # Try to map the column
+                            mapped_col = column_manager.map_column(source_table, param)
+                            if column_manager.has_column(source_table, mapped_col):
+                                valid_params.append(mapped_col)
+                            else:
+                                # Column doesn't exist, treat as literal string
+                                valid_params.append(f'"{param}"')
+                
+                if valid_params:
+                    return f'CONCAT({", ".join(valid_params)})'
             
-            # Fallback to configured name concatenation
+            # Fallback to configured name concatenation only if parsing failed
             return column_manager.get_name_concat_expression(source_table)
         
         # Date operations
