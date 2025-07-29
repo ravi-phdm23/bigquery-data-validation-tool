@@ -75,7 +75,7 @@ def get_app_path():
 
 def run_streamlit_app():
     """Run the Streamlit app directly."""
-    print("Banking Data Validation Framework")
+    print("BigQuery Data Validation Tool")
     print("=" * 50)
     
     # Check if Streamlit is installed
