@@ -426,7 +426,7 @@ def show_excel_mapping_tab():
                                 try:
                                     sql_result[0] = generate_sql_for_scenario(
                                         selected_scenario,
-                                        st.session_state.get('project_id', 'cohesive-apogee-411113'),
+                                        st.session_state.get('project_id'),
                                         st.session_state.get('dataset_id', 'banking_sample_data')
                                     )
                                 except Exception as e:
