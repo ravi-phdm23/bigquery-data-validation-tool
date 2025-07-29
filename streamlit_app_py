@@ -274,17 +274,44 @@ def show_excel_mapping_tab():
                     # Generate scenarios button
                     if st.button("Generate Validation Scenarios", type="primary"):
                         with st.spinner("Generating scenarios..."):
-                            scenarios = generate_scenarios_from_excel(
-                                df, 
-                                st.session_state.get('project_id'),
-                                st.session_state.get('dataset_id')
-                            )
+                            # Add progress indicator
+                            progress_bar = st.progress(0)
+                            status_text = st.empty()
                             
-                            if scenarios:
-                                st.session_state['excel_scenarios'] = scenarios
-                                st.success(f"✅ Generated {len(scenarios)} validation scenarios!")
-                            else:
-                                st.warning("⚠️ No valid scenarios could be generated from the Excel file.")
+                            try:
+                                status_text.text("🔍 Analyzing Excel data...")
+                                progress_bar.progress(25)
+                                
+                                scenarios = generate_scenarios_from_excel(
+                                    df, 
+                                    st.session_state.get('project_id'),
+                                    st.session_state.get('dataset_id')
+                                )
+                                
+                                progress_bar.progress(75)
+                                status_text.text("✅ Processing scenarios...")
+                                
+                                if scenarios:
+                                    st.session_state['excel_scenarios'] = scenarios
+                                    progress_bar.progress(100)
+                                    status_text.text("🎉 Scenarios generated successfully!")
+                                    st.success(f"✅ Generated {len(scenarios)} validation scenarios!")
+                                else:
+                                    progress_bar.progress(100)
+                                    status_text.text("⚠️ No scenarios generated")
+                                    st.warning("⚠️ No valid scenarios could be generated from the Excel file.")
+                            
+                            except Exception as e:
+                                progress_bar.progress(100)
+                                status_text.text("❌ Error during generation")
+                                st.error(f"Error generating scenarios: {str(e)}")
+                            
+                            finally:
+                                # Clear progress indicators after a short delay
+                                import time
+                                time.sleep(2)
+                                progress_bar.empty()
+                                status_text.empty()
     
     # Show scenarios preview and SQL section if scenarios exist - this is outside the button conditional
     if 'excel_scenarios' in st.session_state and st.session_state['excel_scenarios']:
@@ -309,8 +336,21 @@ def show_excel_mapping_tab():
         with st.expander("🔍 SQL Preview", expanded=False):
             st.markdown("Select a scenario below to view its generated SQL:")
             
-            # Create scenario selection dropdown with stable options
-            scenario_options = [f"{s['scenario_name']} - {get_scenario_type(s)}" for s in scenarios]
+            # Add a clear cache button for stuck SQL generation
+            col_select, col_clear = st.columns([4, 1])
+            
+            with col_clear:
+                if st.button("🗑️ Clear Cache", help="Clear SQL cache if generation gets stuck"):
+                    # Clear all SQL cache entries
+                    keys_to_remove = [key for key in st.session_state.keys() if key.startswith('sql_cache_')]
+                    for key in keys_to_remove:
+                        del st.session_state[key]
+                    st.success("SQL cache cleared!")
+                    st.rerun()
+            
+            with col_select:
+                # Create scenario selection dropdown with stable options
+                scenario_options = [f"{s['scenario_name']} - {get_scenario_type(s)}" for s in scenarios]
             
             # Use session state to maintain selection
             if 'selected_sql_scenario' not in st.session_state:
@@ -375,14 +415,62 @@ def show_excel_mapping_tab():
                 if sql_cache_key not in st.session_state:
                     with st.spinner("Generating SQL..."):
                         try:
-                            sql_query = generate_sql_for_scenario(
-                                selected_scenario,
-                                st.session_state.get('project_id', 'cohesive-apogee-411113'),
-                                st.session_state.get('dataset_id', 'banking_sample_data')
-                            )
-                            st.session_state[sql_cache_key] = sql_query
+                            # Add timeout protection using threading for cross-platform compatibility
+                            import threading
+                            import time
+                            
+                            sql_result = [None]  # Use list to allow modification in nested function
+                            exception_result = [None]
+                            
+                            def generate_sql_with_timeout():
+                                try:
+                                    sql_result[0] = generate_sql_for_scenario(
+                                        selected_scenario,
+                                        st.session_state.get('project_id', 'cohesive-apogee-411113'),
+                                        st.session_state.get('dataset_id', 'banking_sample_data')
+                                    )
+                                except Exception as e:
+                                    exception_result[0] = e
+                            
+                            # Start the SQL generation in a separate thread
+                            sql_thread = threading.Thread(target=generate_sql_with_timeout)
+                            sql_thread.daemon = True
+                            sql_thread.start()
+                            
+                            # Wait for up to 30 seconds
+                            sql_thread.join(timeout=30)
+                            
+                            if sql_thread.is_alive():
+                                # Thread is still running - timeout occurred
+                                st.session_state[sql_cache_key] = """-- ⏰ TIMEOUT: SQL generation took too long (>30 seconds)
+-- This might indicate an issue with the scenario configuration or database connection
+-- Please try simplifying the derivation logic or check your connection settings
+-- You can try refreshing the page or restarting the application
+
+SELECT 'SQL generation timeout' as timeout_message;"""
+                            elif exception_result[0]:
+                                # Exception occurred during generation
+                                st.session_state[sql_cache_key] = f"""-- ❌ ERROR: SQL generation failed
+-- Error details: {str(exception_result[0])}
+-- Please check your scenario configuration and try again
+
+SELECT 'SQL generation error: {str(exception_result[0])}' as error_message;"""
+                            elif sql_result[0]:
+                                # Success
+                                st.session_state[sql_cache_key] = sql_result[0]
+                            else:
+                                # Unknown state
+                                st.session_state[sql_cache_key] = """-- ❓ UNKNOWN: SQL generation completed but returned no result
+-- Please try refreshing or check your scenario configuration
+
+SELECT 'Unknown SQL generation state' as unknown_message;"""
+                                
                         except Exception as e:
-                            st.session_state[sql_cache_key] = f"-- Error generating SQL: {str(e)}"
+                            st.session_state[sql_cache_key] = f"""-- ❌ SYSTEM ERROR: Failed to start SQL generation
+-- Error details: {str(e)}
+-- This might be a system-level issue. Please restart the application
+
+SELECT 'System error in SQL generation: {str(e)}' as system_error;"""
                 
                 sql_query = st.session_state[sql_cache_key]
                 
