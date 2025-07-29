@@ -115,9 +115,17 @@ def convert_business_logic_to_safe_sql(derivation_logic, source_table, project_i
         elif logic.upper().startswith('CONCAT('):
             # First, try to use the original logic as-is if it contains valid column references
             import re
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            logger.info(f"🔍 CONCAT Processing: Input logic = '{logic}'")
+            logger.info(f"🔍 CONCAT Processing: Source table = '{source_table}'")
+            logger.info(f"🔍 CONCAT Processing: Available columns = {available_columns}")
+            
             concat_match = re.search(r'CONCAT\((.*?)\)', logic, re.IGNORECASE)
             if concat_match:
                 concat_content = concat_match.group(1)
+                logger.info(f"🔍 CONCAT Processing: Extracted content = '{concat_content}'")
                 
                 # Parse the CONCAT parameters more carefully
                 # Split by comma but respect quoted strings
@@ -152,31 +160,64 @@ def convert_business_logic_to_safe_sql(derivation_logic, source_table, project_i
                 if current_param.strip():
                     params.append(current_param.strip())
                 
+                logger.info(f"🔍 CONCAT Processing: Parsed params = {params}")
+                
                 # Now validate each parameter
                 valid_params = []
-                for param in params:
+                for i, param in enumerate(params):
                     param = param.strip()
+                    logger.info(f"🔍 CONCAT Processing: Param {i+1} = '{param}'")
                     
                     # If it's a quoted string, keep it as-is
                     if param.startswith('"') and param.endswith('"'):
                         valid_params.append(param)
+                        logger.info(f"🔍 CONCAT Processing: Param {i+1} is quoted string, keeping as-is")
                     elif param.startswith("'") and param.endswith("'"):
                         valid_params.append(param)
+                        logger.info(f"🔍 CONCAT Processing: Param {i+1} is quoted string, keeping as-is")
                     else:
-                        # It's a column reference - check if it exists in the table
+                        # It's potentially a column reference - check if it exists in the table
+                        # First, check exact match (case-sensitive)
                         if column_manager.has_column(source_table, param):
                             valid_params.append(param)
+                            logger.info(f"🔍 CONCAT Processing: Param {i+1} found as exact column match")
                         else:
-                            # Try to map the column
-                            mapped_col = column_manager.map_column(source_table, param)
-                            if column_manager.has_column(source_table, mapped_col):
-                                valid_params.append(mapped_col)
+                            # Try case-insensitive match
+                            available_columns = column_manager.get_table_columns(source_table)
+                            found_column = None
+                            
+                            for col in available_columns:
+                                if col.lower() == param.lower():
+                                    found_column = col
+                                    break
+                            
+                            if found_column:
+                                valid_params.append(found_column)
+                                logger.info(f"🔍 CONCAT Processing: Param {i+1} found as case-insensitive match: '{found_column}'")
                             else:
-                                # Column doesn't exist, treat as literal string
-                                valid_params.append(f'"{param}"')
+                                # Try column mapping (logical name to actual name)
+                                mapped_col = column_manager.map_column(source_table, param)
+                                if column_manager.has_column(source_table, mapped_col):
+                                    valid_params.append(mapped_col)
+                                    logger.info(f"🔍 CONCAT Processing: Param {i+1} found via mapping: '{mapped_col}'")
+                                else:
+                                    # Check if this looks like a column name pattern
+                                    # Column names typically contain letters, numbers, underscores
+                                    import re
+                                    if re.match(r'^[a-zA-Z][a-zA-Z0-9_]*$', param):
+                                        # Looks like a column name - use as-is (don't quote it)
+                                        # This preserves user's column references even if not in our schema
+                                        valid_params.append(param)
+                                        logger.info(f"🔍 CONCAT Processing: Param {i+1} looks like column name, using as-is: '{param}'")
+                                    else:
+                                        # Doesn't look like a column name, treat as literal string
+                                        valid_params.append(f'"{param}"')
+                                        logger.info(f"🔍 CONCAT Processing: Param {i+1} treated as literal string: '\"param\"'")
                 
                 if valid_params:
-                    return f'CONCAT({", ".join(valid_params)})'
+                    result = f'CONCAT({", ".join(valid_params)})'
+                    logger.info(f"🔍 CONCAT Processing: Final result = '{result}'")
+                    return result
             
             # Fallback to configured name concatenation only if parsing failed
             return column_manager.get_name_concat_expression(source_table)
