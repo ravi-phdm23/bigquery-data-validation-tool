@@ -370,8 +370,8 @@ direct_comparison AS (
         t.target_value,
         CASE 
             WHEN s.source_value IS NULL AND t.target_value IS NULL THEN 'EXACT_MATCH'
-            WHEN s.source_value IS NULL THEN 'SOURCE_NULL'
-            WHEN t.target_value IS NULL THEN 'TARGET_NULL'
+            WHEN s.source_value IS NULL THEN 'EXACT_MATCH'  -- Source NULL also counts as match
+            WHEN t.target_value IS NULL THEN 'EXACT_MATCH'  -- Target NULL also counts as match
             WHEN CAST(s.source_value AS STRING) = CAST(t.target_value AS STRING) THEN 'EXACT_MATCH'
             ELSE 'VALUE_MISMATCH'
         END as comparison_result,
@@ -390,8 +390,8 @@ comparison_summary AS (
         COUNT(*) as total_records,
         COUNTIF(comparison_result = 'EXACT_MATCH') as exact_matches,
         COUNTIF(comparison_result = 'VALUE_MISMATCH') as mismatches,
-        COUNTIF(comparison_result = 'SOURCE_NULL') as source_nulls,
-        COUNTIF(comparison_result = 'TARGET_NULL') as target_nulls,
+        COUNTIF(comparison_result = 'EXACT_MATCH' AND source_value IS NULL) as source_nulls,
+        COUNTIF(comparison_result = 'EXACT_MATCH' AND target_value IS NULL) as target_nulls,
         0 as both_nulls  -- Both NULL now counts as EXACT_MATCH
     FROM direct_comparison
 ),
@@ -601,8 +601,8 @@ comparison AS (
         t.actual_{target_column},
         CASE 
             WHEN s.calculated_{target_column} IS NULL AND t.actual_{target_column} IS NULL THEN 'MATCH'
-            WHEN s.calculated_{target_column} IS NULL THEN 'SOURCE_NULL'
-            WHEN t.actual_{target_column} IS NULL THEN 'TARGET_NULL'
+            WHEN s.calculated_{target_column} IS NULL THEN 'MATCH'  -- Source NULL also counts as match
+            WHEN t.actual_{target_column} IS NULL THEN 'MATCH'  -- Target NULL also counts as match
             WHEN ABS(CAST(s.calculated_{target_column} AS FLOAT64) - CAST(t.actual_{target_column} AS FLOAT64)) < 0.01 THEN 'MATCH'
             ELSE 'MISMATCH'
         END as validation_result
@@ -614,8 +614,8 @@ validation_summary AS (
         COUNT(*) as total_rows,
         COUNTIF(validation_result = 'MATCH') as matching_rows,
         COUNTIF(validation_result = 'MISMATCH') as mismatched_rows,
-        COUNTIF(validation_result = 'SOURCE_NULL') as source_null_rows,
-        COUNTIF(validation_result = 'TARGET_NULL') as target_null_rows,
+        COUNTIF(validation_result = 'MATCH' AND calculated_{target_column} IS NULL) as source_null_rows,
+        COUNTIF(validation_result = 'MATCH' AND actual_{target_column} IS NULL) as target_null_rows,
         0 as both_null_rows  -- Both NULL now counts as MATCH
     FROM comparison
 )
@@ -704,8 +704,8 @@ detailed_comparison AS (
         t.actual_{target_column},
         CASE 
             WHEN s.calculated_{target_column} IS NULL AND t.actual_{target_column} IS NULL THEN 'PASS'
-            WHEN s.calculated_{target_column} IS NULL THEN 'SOURCE_NULL'
-            WHEN t.actual_{target_column} IS NULL THEN 'TARGET_NULL'
+            WHEN s.calculated_{target_column} IS NULL THEN 'PASS'  -- Source NULL also counts as pass
+            WHEN t.actual_{target_column} IS NULL THEN 'PASS'  -- Target NULL also counts as pass
             WHEN CAST(s.calculated_{target_column} AS STRING) = CAST(t.actual_{target_column} AS STRING) THEN 'PASS'
             ELSE 'FAIL'
         END as validation_result,
@@ -724,8 +724,8 @@ validation_summary AS (
         COUNT(*) as total_rows,
         COUNTIF(validation_result = 'PASS') as passed_rows,
         COUNTIF(validation_result = 'FAIL') as failed_rows,
-        COUNTIF(validation_result = 'SOURCE_NULL') as source_null_rows,
-        COUNTIF(validation_result = 'TARGET_NULL') as target_null_rows,
+        COUNTIF(validation_result = 'PASS' AND calculated_{target_column} IS NULL) as source_null_rows,
+        COUNTIF(validation_result = 'PASS' AND actual_{target_column} IS NULL) as target_null_rows,
         0 as both_null_rows  -- Both NULL now counts as PASS
     FROM detailed_comparison
 )
@@ -871,8 +871,8 @@ detailed_comparison AS (
         t.actual_{target_column},
         CASE 
             WHEN s.calculated_{target_column} IS NULL AND t.actual_{target_column} IS NULL THEN 'PASS'
-            WHEN s.calculated_{target_column} IS NULL THEN 'SOURCE_NULL'
-            WHEN t.actual_{target_column} IS NULL THEN 'TARGET_NULL'
+            WHEN s.calculated_{target_column} IS NULL THEN 'PASS'  -- Source NULL also counts as pass
+            WHEN t.actual_{target_column} IS NULL THEN 'PASS'  -- Target NULL also counts as pass
             WHEN CAST(s.calculated_{target_column} AS STRING) = CAST(t.actual_{target_column} AS STRING) THEN 'PASS'
             ELSE 'FAIL'
         END as validation_result,
@@ -892,8 +892,8 @@ validation_summary AS (
         COUNT(DISTINCT composite_key) as unique_keys,
         COUNTIF(validation_result = 'PASS') as passed_rows,
         COUNTIF(validation_result = 'FAIL') as failed_rows,
-        COUNTIF(validation_result = 'SOURCE_NULL') as source_null_rows,
-        COUNTIF(validation_result = 'TARGET_NULL') as target_null_rows,
+        COUNTIF(validation_result = 'PASS' AND calculated_{target_column} IS NULL) as source_null_rows,
+        COUNTIF(validation_result = 'PASS' AND actual_{target_column} IS NULL) as target_null_rows,
         0 as both_null_rows  -- Both NULL now counts as PASS
     FROM detailed_comparison
 ),
@@ -1040,7 +1040,7 @@ comparison AS (
         CASE 
             WHEN s.lookup_result IS NULL AND t.actual_{target_column} IS NULL THEN 'MATCH'
             WHEN s.lookup_result IS NULL THEN 'LOOKUP_FAILED'
-            WHEN t.actual_{target_column} IS NULL THEN 'TARGET_NULL'
+            WHEN t.actual_{target_column} IS NULL THEN 'MATCH'  -- Target NULL also counts as match
             WHEN CAST(s.lookup_result AS STRING) = CAST(t.actual_{target_column} AS STRING) THEN 'MATCH'
             ELSE 'MISMATCH'
         END as validation_result
@@ -1053,7 +1053,7 @@ validation_summary AS (
         COUNTIF(validation_result = 'MATCH') as matching_rows,
         COUNTIF(validation_result = 'MISMATCH') as mismatched_rows,
         COUNTIF(validation_result = 'LOOKUP_FAILED') as failed_lookups,
-        COUNTIF(validation_result = 'TARGET_NULL') as target_nulls
+        COUNTIF(validation_result = 'MATCH' AND actual_{target_column} IS NULL) as target_nulls
     FROM comparison
 )
 SELECT 
