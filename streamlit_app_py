@@ -382,21 +382,9 @@ def show_excel_mapping_tab():
         with st.expander("🔍 SQL Preview", expanded=False):
             st.markdown("Select a scenario below to view its generated SQL:")
             
-            # Add a clear cache button for stuck SQL generation
-            col_select, col_clear = st.columns([4, 1])
-            
-            with col_clear:
-                if st.button("🗑️ Clear Cache", help="Clear SQL cache if generation gets stuck"):
-                    # Clear all SQL cache entries
-                    keys_to_remove = [key for key in st.session_state.keys() if key.startswith('sql_cache_')]
-                    for key in keys_to_remove:
-                        del st.session_state[key]
-                    st.success("SQL cache cleared!")
-                    st.rerun()
-            
-            with col_select:
-                # Create scenario selection dropdown with stable options
-                scenario_options = [f"{s['scenario_name']} - {get_scenario_type(s)}" for s in scenarios]
+            # Scenario selection dropdown
+            # Create scenario selection dropdown with stable options
+            scenario_options = [f"{s['scenario_name']} - {get_scenario_type(s)}" for s in scenarios]
             
             # Use session state to maintain selection
             if 'selected_sql_scenario' not in st.session_state:
@@ -448,34 +436,23 @@ def show_excel_mapping_tab():
                 source_dataset = selected_scenario.get('source_dataset_id', 'banking_sample_data')
                 target_dataset = selected_scenario.get('target_dataset_id', 'banking_sample_data')
                 
+                
                 if source_dataset != target_dataset:
                     st.info(f"🔄 **Cross-Dataset Validation:** This scenario validates data across different datasets ({source_dataset} → {target_dataset})")
                 elif source_dataset != 'banking_sample_data':
                     st.info(f"📊 **Custom Dataset:** This scenario uses dataset: {source_dataset}")
                 
-                # SQL section (not nested in expander since we're already inside the SQL Preview expander)
-                st.markdown("#### Generated SQL Query")
+                st.info("� **Next Step:** Use the '⚙️ Generate SQL Query' section below to create and view the SQL query for this scenario.")
+            else:
+                st.warning("No scenario selected or scenario not found.")        # Generate SQL Query Section - Separate expandable section
+        with st.expander("⚙️ Generate SQL Query", expanded=False):
+            if selected_scenario:
                 # Cache SQL generation in session state to avoid regeneration
                 sql_cache_key = f"sql_cache_{selected_scenario['scenario_name']}"
                 
                 # Check if project ID is configured before attempting SQL generation
                 project_id = st.session_state.get('project_id')
                 dataset_id = st.session_state.get('dataset_id')
-                
-                # Debug information
-                st.markdown("**🔍 Configuration Check:**")
-                col_debug1, col_debug2 = st.columns(2)
-                with col_debug1:
-                    if project_id:
-                        st.success(f"✅ Project ID: `{project_id}`")
-                    else:
-                        st.error("❌ Project ID: Not configured")
-                
-                with col_debug2:
-                    if dataset_id:
-                        st.success(f"✅ Dataset ID: `{dataset_id}`")
-                    else:
-                        st.warning("⚠️ Dataset ID: Not configured")
                 
                 if not project_id:
                     st.warning("⚠️ **Project ID Required**")
@@ -484,10 +461,10 @@ def show_excel_mapping_tab():
                     # Add manual override for testing
                     with st.expander("🛠️ Manual Override (for testing)", expanded=False):
                         st.warning("**Use this only for testing purposes**")
-                        manual_project_id = st.text_input("Enter Project ID manually:", key="manual_project_override")
-                        manual_dataset_id = st.text_input("Enter Dataset ID manually:", key="manual_dataset_override")
+                        manual_project_id = st.text_input("Enter Project ID manually:", key="manual_project_override_gen")
+                        manual_dataset_id = st.text_input("Enter Dataset ID manually:", key="manual_dataset_override_gen")
                         
-                        if st.button("🔧 Use Manual Values", key="use_manual_override"):
+                        if st.button("🔧 Use Manual Values", key="use_manual_override_gen"):
                             if manual_project_id and manual_dataset_id:
                                 st.session_state['project_id'] = manual_project_id
                                 st.session_state['dataset_id'] = manual_dataset_id
@@ -590,7 +567,7 @@ SELECT 'System error in SQL generation: {str(e)}' as system_error;"""
                             data=sql_query,
                             file_name=f"{selected_scenario['scenario_name']}_validation.sql",
                             mime="text/sql",
-                            key=f"download_sql_{selected_scenario['scenario_name']}"
+                            key=f"download_sql_gen_{selected_scenario['scenario_name']}"
                         )
                         
                         st.info("💡 You can copy the SQL above and run it directly in BigQuery console.")
@@ -603,11 +580,11 @@ SELECT 'System error in SQL generation: {str(e)}' as system_error;"""
                         if "Project ID not configured" in sql_query:
                             st.info("👆 **Next Steps:**\n1. Enter your Google Cloud Project ID in the sidebar\n2. Click 'Connect to BigQuery'\n3. Try generating SQL again")
                         elif "timeout" in sql_query.lower():
-                            st.info("👆 **Next Steps:**\n1. Click '🗑️ Clear Cache' button above\n2. Try a simpler derivation logic\n3. Check your internet connection")
+                            st.info("👆 **Next Steps:**\n1. Try a simpler derivation logic\n2. Check your internet connection\n3. Refresh the page if needed")
                         else:
-                            st.info("👆 **Next Steps:**\n1. Check your scenario configuration\n2. Verify your BigQuery connection\n3. Try clicking '🗑️ Clear Cache' button above")
+                            st.info("👆 **Next Steps:**\n1. Check your scenario configuration\n2. Verify your BigQuery connection\n3. Refresh the page if needed")
             else:
-                st.warning("No scenario selected or scenario not found.")
+                st.warning("No scenario selected. Please select a scenario from the SQL Preview section above.")
         
         # Execute scenarios section
         st.markdown("---")
